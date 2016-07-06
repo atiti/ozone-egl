@@ -47,10 +47,8 @@ class eglWindow : public PlatformWindow, public PlatformEventDispatcher {
 
  private:
   PlatformWindowDelegate* delegate_;
-  //LibeglplatformShimLoader* eglplatform_shim_;
   EventFactoryEvdev* event_factory_;
   gfx::Rect bounds_;
-  //ShimNativeWindowId window_id_;
   SurfaceFactoryEgl* surface_factory_;
   intptr_t window_id_;
 

@@ -35,18 +35,15 @@ class EglOzoneCanvas: public ui::SurfaceOzoneCanvas {
   ~EglOzoneCanvas() override  ;
   // SurfaceOzoneCanvas overrides:
   void ResizeCanvas(const gfx::Size& viewport_size) override;
-  //virtual skia::RefPtr<SkCanvas> GetCanvas() override {
-  //  return skia::SharePtr<SkCanvas>(surface_->getCanvas());
-  //}
   void PresentCanvas(const gfx::Rect& damage) override;
   
   scoped_ptr<gfx::VSyncProvider> CreateVSyncProvider() override {
     return scoped_ptr<gfx::VSyncProvider>();
   }
-  skia::RefPtr<SkSurface> GetSurface() override { return surface_; }
+  sk_sp<SkSurface> GetSurface() override { return surface_; }
 
  private: 
-  skia::RefPtr<SkSurface> surface_;
+  sk_sp<SkSurface> surface_;
   ozone_egl_UserData userDate_;
 };
 
@@ -69,12 +66,7 @@ void EglOzoneCanvas::ResizeCanvas(const gfx::Size& viewport_size)
   {
       ozone_egl_textureShutDown (&userDate_);
   }
-  surface_ = skia::AdoptRef(SkSurface::NewRaster(
-        SkImageInfo::Make(viewport_size.width(),
-                                   viewport_size.height(),
-                                   kN32_SkColorType,
-                                   kPremul_SkAlphaType)));
-  userDate_.width = viewport_size.width();
+ surface_ = SkSurface::MakeRasterN32Premul(viewport_size.width(),viewport_size.height());
   userDate_.height = viewport_size.height();
   userDate_.colorType = GL_BGRA_EXT;
   ozone_egl_textureInit ( &userDate_);
@@ -109,9 +101,8 @@ class OzoneEgl : public ui::SurfaceOzoneEGL {
     return true;
   }
 
-  bool OnSwapBuffersAsync(const SwapCompletionCallback& callback) override
+  void  OnSwapBuffersAsync(const SwapCompletionCallback& callback) override
   { 
-    return true; 
   }
 
   bool ResizeNativeWindow(const gfx::Size& viewport_size) override {
@@ -121,6 +112,12 @@ class OzoneEgl : public ui::SurfaceOzoneEGL {
 
   scoped_ptr<gfx::VSyncProvider> CreateVSyncProvider() override {
     return scoped_ptr<gfx::VSyncProvider>();
+  }
+
+   // Returns the EGL configuration to use for this surface. The default EGL
+  // configuration will be used if this returns nullptr.
+  void* /* EGLConfig */ GetEGLSurfaceConfig(const EglConfigCallbacks& egl) override {
+   return nullptr;
   }
 
  private:
@@ -185,11 +182,6 @@ intptr_t SurfaceFactoryEgl::GetNativeWindow(){
   return (intptr_t)ozone_egl_GetNativeWin();
 }
 
-//gfx::AcceleratedWidget SurfaceFactoryEgl::GetAcceleratedWidget() {
-//  if (!CreateSingleWindow())
-//    LOG(FATAL) << "failed to create window";
-//  return (gfx::AcceleratedWidget)GetNativeDisplay();
-//}
 
 scoped_ptr<ui::SurfaceOzoneEGL>
 SurfaceFactoryEgl::CreateEGLSurfaceForWidget(
@@ -205,10 +197,6 @@ bool SurfaceFactoryEgl::LoadEGLGLES2Bindings(
   //return false;
 }
 
-const int32* SurfaceFactoryEgl::GetEGLSurfaceProperties(
-    const int32* desired_list) {
-  return ozone_egl_getConfigAttribs();
-}
 
 scoped_ptr<ui::SurfaceOzoneCanvas> SurfaceFactoryEgl::CreateCanvasForWidget(
       gfx::AcceleratedWidget widget){

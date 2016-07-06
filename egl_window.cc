@@ -77,7 +77,9 @@ namespace ui {
  }
  
  void eglWindow::MoveCursorTo(const gfx::Point& location) {
-   event_factory_->WarpCursorTo(window_id_, location);
+   gfx::PointF locationF;
+   locationF.SetPoint(location.x(),location.y());
+   event_factory_->WarpCursorTo(window_id_, locationF);
  }
  
  void eglWindow::ConfineCursorToBounds(const gfx::Rect& bounds) {
@@ -89,9 +91,6 @@ bool eglWindow::CanDispatchEvent(const PlatformEvent& ne) {
 
 uint32_t eglWindow::DispatchEvent(const PlatformEvent& native_event) {
   DCHECK(native_event);
- // Event* event = static_cast<Event*>(native_event);
- // if (event->IsTouchEvent())
-//    ScaleTouchEvent(static_cast<TouchEvent*>(event), bounds_.size());
 
   DispatchEventFromNativeUiEvent(
       native_event, base::Bind(&PlatformWindowDelegate::DispatchEvent,

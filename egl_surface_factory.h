@@ -27,11 +27,8 @@ class SurfaceFactoryEgl : public ui::SurfaceFactoryOzone {
 
   // SurfaceFactoryOzone:
   intptr_t GetNativeDisplay() override;
-  //virtual gfx::AcceleratedWidget GetAcceleratedWidget() override;
   scoped_ptr<ui::SurfaceOzoneEGL> CreateEGLSurfaceForWidget(
       gfx::AcceleratedWidget widget) override;
-  const int32* GetEGLSurfaceProperties(
-      const int32* desired_list) override;
   bool LoadEGLGLES2Bindings(
       AddGLLibraryCallback add_gl_library,
       SetGLGetProcAddressProcCallback set_gl_get_proc_address) override;
