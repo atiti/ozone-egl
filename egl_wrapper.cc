@@ -162,7 +162,7 @@ bool EglWrapper::ozone_egl_setup()
     int fb_handle = open("/dev/fb0", O_RDWR);
     if (-1 == fb_handle) {
       LOG(ERROR) << "Failed to open framebuffer";
-      return OZONE_EGL_FAILURE;
+      return false;
     }
 
     // Get variable info
@@ -170,7 +170,7 @@ bool EglWrapper::ozone_egl_setup()
     if (-1 == ioctl(fb_handle, FBIOGET_VSCREENINFO, &vinfo)) {
       LOG(ERROR) << "Failed to get the variable framebuffer info";
       close(fb_handle);
-      return OZONE_EGL_FAILURE;
+      return false;
     }
 
 #define SUPERTILING32 0x52344935
@@ -182,7 +182,7 @@ bool EglWrapper::ozone_egl_setup()
       if (-1 == ioctl(fb_handle, FBIOPUT_VSCREENINFO, &vinfo)) {
         LOG(ERROR) << "Resetting vinfo.nonstd failed";
         close(fb_handle);
-        return OZONE_EGL_FAILURE;
+        return false;
       }
       LOG(INFO) << "vinfo.nonstd set successfully to 32-bit supertiling";
     }
