@@ -145,52 +145,6 @@ EglWrapper& EglWrapper::getInstance()
 
 bool EglWrapper::ozone_egl_setup()
 {
-
-  // This is a fix for trashed HDMI output when Chromium execution ends
-  // (such as after reboot command was issued) on i.MX6 with Vivante GC2000
-  // GPU. Problem is that EGL attempts to restore framebuffer settings to
-  // their previous (before Chromium started) values, but won't clear
-  // framebuffer content. Often we end up having supertiled content
-  // (because that is what GC2000 renders) and settings as if for ordinary
-  // bitmaps (because that was set before Chromium started). HDMI tries to
-  // display supertiled content as it if was bitmap, and that creates
-  // "scrambled" image. To avoid this problem, we set 32-bit supertiling
-  // before EGL starts.
-  if (!strcmp(getenv("AIRTAME_PLATFORM"), "DG2")) {
-
-    // Open framebuffer
-    int fb_handle = open("/dev/fb0", O_RDWR);
-    if (-1 == fb_handle) {
-      LOG(ERROR) << "Failed to open framebuffer";
-      return false;
-    }
-
-    // Get variable info
-    fb_var_screeninfo vinfo;
-    if (-1 == ioctl(fb_handle, FBIOGET_VSCREENINFO, &vinfo)) {
-      LOG(ERROR) << "Failed to get the variable framebuffer info";
-      close(fb_handle);
-      return false;
-    }
-
-#define SUPERTILING32 0x52344935
-
-    // Make sure nonstd field is set for supertiling
-    if (SUPERTILING32 != vinfo.nonstd) {
-      // Nope, we have to reset
-      vinfo.nonstd = SUPERTILING32;
-      if (-1 == ioctl(fb_handle, FBIOPUT_VSCREENINFO, &vinfo)) {
-        LOG(ERROR) << "Resetting vinfo.nonstd failed";
-        close(fb_handle);
-        return false;
-      }
-      LOG(INFO) << "vinfo.nonstd set successfully to 32-bit supertiling";
-    }
-
-    // OK, that is all
-    close(fb_handle);
-  }
-
   EGLConfig configs[10];
   EGLint matchingConfigs;
   EGLint err;

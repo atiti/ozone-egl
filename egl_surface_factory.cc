@@ -19,8 +19,64 @@
 #include <linux/fb.h>
 #include <sys/ioctl.h>
 
+// GPU tiled value for supertiled-32bit is taken from kernel.
+// If not defined for a given platform, we define it as 0 (it's
+// the case of Airtame DG1 for example)
+#include <linux/ipu.h>
+#ifndef IPU_PIX_FMT_GPU32_SRT
+#define IPU_PIX_FMT_GPU32_SRT 0
+#endif
+
 #define OZONE_EGL_WINDOW_WIDTH 1024
 #define OZONE_EGL_WINDOW_HEIGTH 768
+
+namespace {
+// This is a fix for trashed HDMI output when Chromium execution ends
+// (such as after reboot command was issued) on i.MX6 with Vivante GC2000
+// GPU. Problem is that EGL attempts to restore framebuffer settings to
+// their previous (before Chromium started) values, but won't clear
+// framebuffer content. Often we end up having supertiled content
+// (because that is what GC2000 renders) and settings as if for ordinary
+// bitmaps (because that was set before Chromium started). HDMI tries to
+// display supertiled content as it if was bitmap, and that creates
+// "scrambled" image. To avoid this problem, we set 32-bit supertiling
+// before EGL starts.
+bool SetGpuTileFormat(const uint32_t iGPUTileFormat) {
+    // Open framebuffer
+    int fb_handle = open("/dev/fb0", O_RDWR);
+    if (-1 == fb_handle) {
+        LOG(ERROR) << "Failed to open framebuffer";
+        return false;
+    }
+
+    // Get variable info
+    fb_var_screeninfo vinfo = {};
+    if (-1 == ioctl(fb_handle, FBIOGET_VSCREENINFO, &vinfo)) {
+        LOG(ERROR) << "Failed to get the variable framebuffer info";
+        close(fb_handle);
+        return false;
+    }
+
+    // Check if current value is equal to iGPUTileFormat
+    if (iGPUTileFormat != vinfo.nonstd) {
+        // Nope, we have to reset
+        vinfo.nonstd = iGPUTileFormat;
+        if (-1 == ioctl(fb_handle, FBIOPUT_VSCREENINFO, &vinfo)) {
+            LOG(ERROR) << "Resetting vinfo.nonstd failed";
+            close(fb_handle);
+            return false;
+        }
+    }
+    // OK, that is all
+    close(fb_handle);
+    return true;
+}
+
+std::string GetPlatformName() {
+    auto env_platform = std::getenv("AIRTAME_PLATFORM");
+    return (env_platform) ? env_platform : "";
+}
+}
 
 namespace ui {
 
@@ -57,10 +113,23 @@ class OzoneEgl : public ui::SurfaceOzoneEGL {
 };
 
 SurfaceFactoryEgl::SurfaceFactoryEgl() {
+    if (GetPlatformName() == "DG2") {
+        // set GPU tile format to super-tiled 32bit before
+        // calling fbCreateWindow which sets nonstd flag for
+        // /dev/fb0 with current fb_var_screeninfo
+        SetGpuTileFormat(IPU_PIX_FMT_GPU32_SRT);
+    }
+
     CreateNativeWindow();
 }
 
 SurfaceFactoryEgl::~SurfaceFactoryEgl() {
+    if (GetPlatformName() == "DG2") {
+        // set GPU tile format to super-tiled 32bit to
+        // make sure to have a proper default value at
+        // the following startup
+        SetGpuTileFormat(IPU_PIX_FMT_GPU32_SRT);
+    }
 }
 
 // TODO: This should be called only in "accelerated drawing" mode. Calling in
