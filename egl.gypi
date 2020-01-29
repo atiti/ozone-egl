@@ -18,12 +18,14 @@
       'type': 'static_library',
       'defines': [
         'OZONE_IMPLEMENTATION',
+        'LINUX',
+        'EGL_API_FB'
       ],
       'dependencies': [
-        '../../base/base.gyp:base',
-        '../events/events.gyp:events',
-        '../events/ozone/events_ozone.gyp:events_ozone_evdev',
-        '../gfx/gfx.gyp:gfx',
+        '../base/base.gyp:base',
+        '../ui/events/events.gyp:events',
+        '../ui/events/ozone/events_ozone.gyp:events_ozone_evdev',
+        '../ui/gfx/gfx.gyp:gfx',
       ],
       'sources': [
         'client_native_pixmap_factory_egl.cc',
@@ -38,6 +40,8 @@
         'egl_wrapper.h',
         'egl_window.cc',
         'egl_window.h',
+        'egl_ozone_canvas.h',
+        'egl_ozone_canvas.cc'
       ],
       'link_settings': {
             'libraries': [

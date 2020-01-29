@@ -1,7 +1,8 @@
 // Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-#include "ui/ozone/platform/egl/egl_surface_factory.h"
+#include "egl_surface_factory.h"
+#include "egl_ozone_canvas.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkSurface.h"
@@ -13,205 +14,159 @@
 #include "base/logging.h"
 #include "ui/ozone/common/egl_util.h"
 
-#include "egl_wrapper.h"
-
-#ifndef GL_BGRA_EXT
- #define GL_BGRA_EXT 0x80E1
-#endif
-
-#include <fcntl.h>    /* For O_RDWR */
-#include <unistd.h>   /* For open(), creat() */
+#include <fcntl.h>  /* For O_RDWR */
+#include <unistd.h> /* For open(), creat() */
 #include <linux/fb.h>
 #include <sys/ioctl.h>
+
+// GPU tiled value for supertiled-32bit is taken from kernel.
+// If not defined for a given platform, we define it as 0 (it's
+// the case of Airtame DG1 for example)
+#include <linux/ipu.h>
+#ifndef IPU_PIX_FMT_GPU32_SRT
+#define IPU_PIX_FMT_GPU32_SRT 0
+#endif
 
 #define OZONE_EGL_WINDOW_WIDTH 1024
 #define OZONE_EGL_WINDOW_HEIGTH 768
 
+namespace {
+// This is a fix for trashed HDMI output when Chromium execution ends
+// (such as after reboot command was issued) on i.MX6 with Vivante GC2000
+// GPU. Problem is that EGL attempts to restore framebuffer settings to
+// their previous (before Chromium started) values, but won't clear
+// framebuffer content. Often we end up having supertiled content
+// (because that is what GC2000 renders) and settings as if for ordinary
+// bitmaps (because that was set before Chromium started). HDMI tries to
+// display supertiled content as it if was bitmap, and that creates
+// "scrambled" image. To avoid this problem, we set 32-bit supertiling
+// before EGL starts.
+bool SetGpuTileFormat(const uint32_t iGPUTileFormat) {
+    // Open framebuffer
+    int fb_handle = open("/dev/fb0", O_RDWR);
+    if (-1 == fb_handle) {
+        LOG(ERROR) << "Failed to open framebuffer";
+        return false;
+    }
+
+    // Get variable info
+    fb_var_screeninfo vinfo = {};
+    if (-1 == ioctl(fb_handle, FBIOGET_VSCREENINFO, &vinfo)) {
+        LOG(ERROR) << "Failed to get the variable framebuffer info";
+        close(fb_handle);
+        return false;
+    }
+
+    // Check if current value is equal to iGPUTileFormat
+    if (iGPUTileFormat != vinfo.nonstd) {
+        // Nope, we have to reset
+        vinfo.nonstd = iGPUTileFormat;
+        if (-1 == ioctl(fb_handle, FBIOPUT_VSCREENINFO, &vinfo)) {
+            LOG(ERROR) << "Resetting vinfo.nonstd failed";
+            close(fb_handle);
+            return false;
+        }
+    }
+    // OK, that is all
+    close(fb_handle);
+    return true;
+}
+
+std::string GetPlatformName() {
+    auto env_platform = std::getenv("AIRTAME_PLATFORM");
+    return (env_platform) ? env_platform : "";
+}
+}
+
 namespace ui {
 
-class EglOzoneCanvas: public ui::SurfaceOzoneCanvas {
- public:
-  EglOzoneCanvas();
-  ~EglOzoneCanvas() override  ;
-  // SurfaceOzoneCanvas overrides:
-  void ResizeCanvas(const gfx::Size& viewport_size) override;
-  //virtual skia::RefPtr<SkCanvas> GetCanvas() override {
-  //  return skia::SharePtr<SkCanvas>(surface_->getCanvas());
-  //}
-  void PresentCanvas(const gfx::Rect& damage) override;
-  
-  scoped_ptr<gfx::VSyncProvider> CreateVSyncProvider() override {
-    return scoped_ptr<gfx::VSyncProvider>();
-  }
-  skia::RefPtr<SkSurface> GetSurface() override { return surface_; }
-
- private: 
-  skia::RefPtr<SkSurface> surface_;
-  ozone_egl_UserData userDate_;
-};
-
-EglOzoneCanvas::EglOzoneCanvas()
-{
-    memset(&userDate_,0,sizeof(userDate_));
-}
-EglOzoneCanvas::~EglOzoneCanvas()
-{
-    ozone_egl_textureShutDown (&userDate_);
-}
-
-void EglOzoneCanvas::ResizeCanvas(const gfx::Size& viewport_size)
-{  
-  if(userDate_.width == viewport_size.width() && userDate_.height==viewport_size.height())
-  {
-      return;
-  }
-  else if(userDate_.width != 0 && userDate_.height !=0)
-  {
-      ozone_egl_textureShutDown (&userDate_);
-  }
-  surface_ = skia::AdoptRef(SkSurface::NewRaster(
-        SkImageInfo::Make(viewport_size.width(),
-                                   viewport_size.height(),
-                                   kN32_SkColorType,
-                                   kPremul_SkAlphaType)));
-  userDate_.width = viewport_size.width();
-  userDate_.height = viewport_size.height();
-  userDate_.colorType = GL_BGRA_EXT;
-  ozone_egl_textureInit ( &userDate_);
-}
-
-void EglOzoneCanvas::PresentCanvas(const gfx::Rect& damage)
-{ 
-    SkImageInfo info;
-    size_t row_bytes;
-    userDate_.data = (char *) surface_->peekPixels(&info, &row_bytes);
-    ozone_egl_textureDraw(&userDate_);
-    ozone_egl_swap();
-}
-
-
+// Specific implementation of SurfaceOzoneEGL in the context of CreateEGLSurfaceForWidget()
+// as called from the GPU process (not used when in software-drawing mode)
 class OzoneEgl : public ui::SurfaceOzoneEGL {
  public:
-  OzoneEgl(gfx::AcceleratedWidget window_id){
-     native_window_ = window_id;
-  }
-  ~OzoneEgl() override {
-     native_window_=0;
-  }
+  OzoneEgl(gfx::AcceleratedWidget window_id) { native_window_ = window_id; }
+  ~OzoneEgl() override { native_window_ = 0; }
 
-  intptr_t GetNativeWindow() override 
-  { 
-    return native_window_; 
-  }
+  intptr_t GetNativeWindow() override { return native_window_; }
 
-  bool OnSwapBuffers() override
-  {
-    return true;
-  }
+  bool OnSwapBuffers() override { return true; }
 
-  bool OnSwapBuffersAsync(const SwapCompletionCallback& callback) override
-  { 
-    return true; 
-  }
+  void OnSwapBuffersAsync(const SwapCompletionCallback& callback) override {}
 
   bool ResizeNativeWindow(const gfx::Size& viewport_size) override {
     return true;
   }
 
-
   scoped_ptr<gfx::VSyncProvider> CreateVSyncProvider() override {
     return scoped_ptr<gfx::VSyncProvider>();
+  }
+
+  // Returns the EGL configuration to use for this surface. The default EGL
+  // configuration will be used if this returns nullptr.
+  void* /* EGLConfig */ GetEGLSurfaceConfig(
+      const EglConfigCallbacks& egl) override {
+    return nullptr;
   }
 
  private:
   intptr_t native_window_;
 };
 
+SurfaceFactoryEgl::SurfaceFactoryEgl() {
+    if (GetPlatformName() == "DG2") {
+        // set GPU tile format to super-tiled 32bit before
+        // calling fbCreateWindow which sets nonstd flag for
+        // /dev/fb0 with current fb_var_screeninfo
+        SetGpuTileFormat(IPU_PIX_FMT_GPU32_SRT);
+    }
 
-
-SurfaceFactoryEgl::SurfaceFactoryEgl():init_(false)
-{
-
+    CreateNativeWindow();
 }
 
-SurfaceFactoryEgl::~SurfaceFactoryEgl()
-{ 
-    DestroySingleWindow(); 
+SurfaceFactoryEgl::~SurfaceFactoryEgl() {
+    if (GetPlatformName() == "DG2") {
+        // set GPU tile format to super-tiled 32bit to
+        // make sure to have a proper default value at
+        // the following startup
+        SetGpuTileFormat(IPU_PIX_FMT_GPU32_SRT);
+    }
 }
-  
-EGLint g_width;
-EGLint g_height;
-bool SurfaceFactoryEgl::CreateSingleWindow()
-{
-  struct fb_var_screeninfo fb_var;
 
-  int fb_fd =  open("/dev/fb0", O_RDWR);
+// TODO: This should be called only in "accelerated drawing" mode. Calling in
+// "software" mode has no effect.
+bool SurfaceFactoryEgl::CreateNativeWindow() {
+  int window_width=0;
+  int window_height=0;
 
-  if(init_)
-  {
-     return true;
-  }
+  native_display_ = (NativeDisplayType)fbGetDisplayByIndex(0);
+  fbGetDisplayGeometry(native_display_,&window_width,&window_height);
+  native_window_ = fbCreateWindow(native_display_, 0, 0, window_width, window_height);
 
-  if (ioctl(fb_fd, FBIOGET_VSCREENINFO, &fb_var)) {
-        LOG(FATAL) << "failed to get fb var info errno: " << errno;
-        g_width = 640;
-	g_height = 480;
-  } else {
-    g_width = fb_var.xres;
-    g_height = fb_var.yres;
-  }
-
- close(fb_fd);
-
- if(!ozone_egl_setup(0, 0, g_width, g_height))
-  {
-      LOG(FATAL) << "CreateSingleWindow";
-      return false;
-  }
-  init_ = true;
   return true;
 }
 
-void SurfaceFactoryEgl::DestroySingleWindow() {
-  ozone_egl_destroy();
-  init_ = false;
-}
 
 intptr_t SurfaceFactoryEgl::GetNativeDisplay() {
-  return (intptr_t)ozone_egl_getNativedisp();
+  return (intptr_t)native_display_;
 }
 
-intptr_t SurfaceFactoryEgl::GetNativeWindow(){
-  return (intptr_t)ozone_egl_GetNativeWin();
+intptr_t SurfaceFactoryEgl::GetNativeWindow() {
+  return (intptr_t)native_window_;
 }
 
-//gfx::AcceleratedWidget SurfaceFactoryEgl::GetAcceleratedWidget() {
-//  if (!CreateSingleWindow())
-//    LOG(FATAL) << "failed to create window";
-//  return (gfx::AcceleratedWidget)GetNativeDisplay();
-//}
-
-scoped_ptr<ui::SurfaceOzoneEGL>
-SurfaceFactoryEgl::CreateEGLSurfaceForWidget(
+scoped_ptr<ui::SurfaceOzoneEGL> SurfaceFactoryEgl::CreateEGLSurfaceForWidget(
     gfx::AcceleratedWidget widget) {
-  return make_scoped_ptr<ui::SurfaceOzoneEGL>(
-      new OzoneEgl(widget));
+  return make_scoped_ptr<ui::SurfaceOzoneEGL>(new OzoneEgl(widget));
 }
 
 bool SurfaceFactoryEgl::LoadEGLGLES2Bindings(
     AddGLLibraryCallback add_gl_library,
-    SetGLGetProcAddressProcCallback set_gl_get_proc_address) { 
+    SetGLGetProcAddressProcCallback set_gl_get_proc_address) {
   return LoadDefaultEGLGLES2Bindings(add_gl_library, set_gl_get_proc_address);
-  //return false;
-}
-
-const int32* SurfaceFactoryEgl::GetEGLSurfaceProperties(
-    const int32* desired_list) {
-  return ozone_egl_getConfigAttribs();
 }
 
 scoped_ptr<ui::SurfaceOzoneCanvas> SurfaceFactoryEgl::CreateCanvasForWidget(
-      gfx::AcceleratedWidget widget){
+    gfx::AcceleratedWidget widget) {
   return make_scoped_ptr<SurfaceOzoneCanvas>(new EglOzoneCanvas());
 }
 

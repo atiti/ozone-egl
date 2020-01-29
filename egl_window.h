@@ -5,7 +5,7 @@
 #include "ui/events/platform/platform_event_dispatcher.h"
 #include "ui/platform_window/platform_window.h"
 #include "ui/platform_window/platform_window_delegate.h"
-#include "ui/ozone/platform/egl/egl_surface_factory.h"
+#include "egl_surface_factory.h"
 
 namespace ui {
 class SurfaceFactoryEgl;
@@ -43,14 +43,12 @@ class eglWindow : public PlatformWindow, public PlatformEventDispatcher {
 
   void SetTitle(const base::string16& title) override {}
 
-  PlatformImeController* GetPlatformImeController() override { return nullptr; }
+  PlatformImeController* GetPlatformImeController() override;
 
  private:
   PlatformWindowDelegate* delegate_;
-  //LibeglplatformShimLoader* eglplatform_shim_;
   EventFactoryEvdev* event_factory_;
   gfx::Rect bounds_;
-  //ShimNativeWindowId window_id_;
   SurfaceFactoryEgl* surface_factory_;
   intptr_t window_id_;
 

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ui/ozone/platform/egl/ozone_platform_egl.h"
-#include "ui/ozone/platform/egl/egl_surface_factory.h"
+#include "ozone_platform_egl.h"
+#include "egl_surface_factory.h"
 
 #include "ui/ozone/common/native_display_delegate_ozone.h"
 #include "ui/ozone/common/stub_overlay_manager.h"
@@ -18,7 +18,6 @@
 #include "ui/ozone/public/system_input_injector.h"
 #include "ui/platform_window/platform_window.h"
 #include "egl_window.h"
-#include "egl_wrapper.h"
 
 namespace ui {
 
@@ -54,25 +53,25 @@ class OzonePlatformEgl : public OzonePlatform {
     return gpu_platform_support_host_.get();
   }
 
-/////
-  scoped_ptr<SystemInputInjector> CreateSystemInputInjector() override {
+
+  std::unique_ptr<SystemInputInjector> CreateSystemInputInjector() override {
     return event_factory_ozone_->CreateSystemInputInjector();
   }
-  scoped_ptr<NativeDisplayDelegate> CreateNativeDisplayDelegate() override {
-    return scoped_ptr<NativeDisplayDelegate>(new NativeDisplayDelegateOzone());
+
+  std::unique_ptr<NativeDisplayDelegate> CreateNativeDisplayDelegate() override {
+    return std::unique_ptr<NativeDisplayDelegate>(new NativeDisplayDelegateOzone());
   }
-  scoped_ptr<PlatformWindow> CreatePlatformWindow(
+
+  std::unique_ptr<PlatformWindow> CreatePlatformWindow(
       PlatformWindowDelegate* delegate,
       const gfx::Rect& bounds) override {
-      scoped_ptr<eglWindow> platform_window(
+      std::unique_ptr<eglWindow> platform_window(
         new eglWindow(delegate, surface_factory_ozone_.get(),
            event_factory_ozone_.get(), bounds));
       platform_window->Initialize();
-      return platform_window.Pass();
+     return std::move(platform_window);
   }
-  base::ScopedFD OpenClientNativePixmapDevice() const override {
-    return base::ScopedFD();
-  }
+
   void InitializeUI() override {
    device_manager_ = CreateDeviceManager();
    overlay_manager_.reset(new StubOverlayManager());
